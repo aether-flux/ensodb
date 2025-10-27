@@ -1,6 +1,8 @@
 use std::{collections::HashMap, time::{SystemTime, UNIX_EPOCH}};
 
-use crate::{record::Record, storage::Storage};
+use serde::{de::DeserializeOwned, Serialize};
+
+use crate::{record::Record, storage::Storage, utils::{from_bytes, to_bytes}};
 
 pub struct EnsoDB {
     pub storage: Storage,
@@ -9,15 +11,21 @@ pub struct EnsoDB {
 
 impl EnsoDB {
     pub fn new() -> Self {
-        Self {
-            storage: Storage::new(),
-            index: HashMap::new(),
+        let mut storage = Storage::new();
+        match storage.rebuild_index() {
+            Ok(index) => Self { storage, index },
+            Err(e) => {
+                println!("[EnsoDB error] Error rebuilding index: {}", e);
+                Self { storage, index: HashMap::new() }
+            },
         }
     }
 
-    pub fn set(&mut self, key: String, value: Vec<u8>) {
+    pub fn set<T: Serialize>(&mut self, key: String, value: T) {
         let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs();
-        let record = Record::new(key.clone(), value, now);
+
+        let encoded_value = to_bytes(&value);
+        let record = Record::new(key.clone(), encoded_value, now);
 
         match self.storage.append(&record) {
             Ok(offset) => {
@@ -27,17 +35,21 @@ impl EnsoDB {
         }
     }
 
-    pub fn get(&mut self, key: String) -> Option<Vec<u8>> {
+    pub fn get<T: DeserializeOwned>(&mut self, key: String) -> Option<T> {
         if let Some(offset) = self.index.get(&key) {
             match self.storage.read_at(*offset) {
                 Ok(record) => {
-                    Some(record.value)
+                    let value: T = from_bytes(&record.value);
+                    Some(value)
                 },
                 Err(e) => {
                     println!("[EnsoDB error] Error while reading: {}", e);
                     None
                 }
             }
+        // } else if let Ok(record, offset) = self.search_in_log(key) { 
+        //     self.index.insert(key.to_string(), offset);
+        //     return Some(record.value);
         } else {
             println!("[EnsoDB error] Record not found in database");
             None

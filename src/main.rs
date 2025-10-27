@@ -8,24 +8,22 @@ mod engine;
 fn main() {
     let mut db = EnsoDB::new();
 
-    db.set("one".to_string(), vec![1, 2, 3]);
-    db.set("two".to_string(), vec![4, 5, 6]);
+    // simple string
+    db.set("greeting".to_string(), "hello world".to_string());
+    
+    // integer
+    db.set("year".to_string(), 2025u32);
+    
+    // float
+    db.set("pi".to_string(), 3.14159f64);
+    
+    // struct
+    #[derive(serde::Serialize, serde::Deserialize, Debug)]
+    struct User { id: u32, name: String }
+    db.set("user".to_string(), User { id: 1, name: "enso".into() });
 
-    println!("Index: {:#?}\n", db.index);
-
-    if let Some(d) = db.get("two".to_string()) {
-        println!("Key: two, Value: {:?}", d);
-    }
-
-    if let Some(d) = db.get("three".to_string()) {
-        println!("Key: three, Value: {:?}", d);
-    }
-
-    db.set("three".to_string(), vec![7, 8, 9]);
-
-    println!("\nIndex: {:#?}\n", db.index);
-
-    if let Some(d) = db.get("three".to_string()) {
-        println!("Key: three, Value: {:?}", d);
-    }
+    println!("{:?}", db.get::<String>("greeting".to_string()));
+    println!("{:?}", db.get::<u32>("year".to_string()));
+    println!("{:?}", db.get::<f64>("pi".to_string()));
+    println!("{:?}", db.get::<User>("user".to_string()));
 }

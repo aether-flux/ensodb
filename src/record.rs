@@ -4,11 +4,12 @@ pub struct Record {
     pub key: String,
     pub value: Vec<u8>,
     pub timestamp: u64,
+    pub deleted: bool,
 }
 
 impl Record {
     pub fn new(key: String, value: Vec<u8>, timestamp: u64) -> Self {
-        Self { key, value, timestamp }
+        Self { key, value, timestamp, deleted: false }
     }
 
     pub fn serialize(&self) -> Vec<u8> {
@@ -16,6 +17,7 @@ impl Record {
 
         bytes.extend_from_slice(&encode_u32(self.key.len() as u32));
         bytes.extend_from_slice(&encode_u32(self.value.len() as u32));
+        bytes.push(self.deleted as u8);
         bytes.extend_from_slice(&self.timestamp.to_be_bytes());
         bytes.extend_from_slice(self.key.as_bytes());
         bytes.extend_from_slice(&self.value);
