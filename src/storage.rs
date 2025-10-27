@@ -24,7 +24,7 @@ impl Storage {
 
         loop {
             // Read header
-            let mut header = [0u8; 16];
+            let mut header = [0u8; 17];
             match self.file.read_exact(&mut header) {
                 Ok(_) => {},
                 Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
@@ -33,10 +33,10 @@ impl Storage {
 
             let key_len = decode_u32(&header[0..4]) as usize;
             let val_len = decode_u32(&header[4..8]) as usize;
-            let record_len = 16 + key_len + val_len;
+            let record_len = 17 + key_len + val_len;
 
             // Read the rest of the record
-            let mut buf = vec![0u8; record_len-16];
+            let mut buf = vec![0u8; record_len-17];
             self.file.read_exact(&mut buf)?;
 
             // Reconstruct the record bytes
@@ -73,12 +73,12 @@ impl Storage {
         self.file.seek(SeekFrom::Start(offset))?;
         
         // first read header (16 bytes)
-        let mut header = [0u8; 16];
+        let mut header = [0u8; 17];
         self.file.read_exact(&mut header)?;
         
         let key_len = decode_u32(&header[0..4]) as usize;
         let val_len = decode_u32(&header[4..8]) as usize;
-        let record_len = 16 + key_len + val_len;
+        let record_len = 17 + key_len + val_len;
         
         // now read the rest
         let mut buf = vec![0u8; record_len];
@@ -87,4 +87,9 @@ impl Storage {
         
         Ok(Record::deserialize(&buf))
     }
+
+    // -> Delete data by adding a record with deleted:true
+    // pub fn delete_key(&mut self, key: String) -> std::io::Result<u64> {
+    //
+    // }
 }

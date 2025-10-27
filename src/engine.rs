@@ -25,7 +25,7 @@ impl EnsoDB {
         let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs();
 
         let encoded_value = to_bytes(&value);
-        let record = Record::new(key.clone(), encoded_value, now);
+        let record = Record::new(key.clone(), encoded_value, now, false);
 
         match self.storage.append(&record) {
             Ok(offset) => {
@@ -39,6 +39,11 @@ impl EnsoDB {
         if let Some(offset) = self.index.get(&key) {
             match self.storage.read_at(*offset) {
                 Ok(record) => {
+                    if record.deleted {
+                        println!("[EnsoDB error] Record not found in database");
+                        return None;
+                    }
+
                     let value: T = from_bytes(&record.value);
                     Some(value)
                 },
@@ -53,6 +58,18 @@ impl EnsoDB {
         } else {
             println!("[EnsoDB error] Record not found in database");
             None
+        }
+    }
+
+    pub fn delete(&mut self, key: String) {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs();
+        let record = Record::new(key.clone(), vec![0; 17], now, true);
+
+        match self.storage.append(&record) {
+            Ok(offset) => {
+                self.index.insert(key, offset);
+            },
+            Err(e) => println!("[EnsoDB error] Error while deleting: {}", e),
         }
     }
 }
