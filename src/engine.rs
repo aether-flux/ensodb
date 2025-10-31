@@ -1,7 +1,5 @@
 use std::{collections::HashMap, time::{SystemTime, UNIX_EPOCH}};
-
 use serde::{de::DeserializeOwned, Serialize};
-
 use crate::{record::Record, storage::Storage, utils::{from_bytes, to_bytes}};
 
 pub struct EnsoDB {
