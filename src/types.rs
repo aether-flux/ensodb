@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Serialize, Deserialize};
 
 // -> Manifest formats
@@ -13,6 +15,8 @@ use serde::{Serialize, Deserialize};
 //     Stale,
 //     Compacted,
 // }
+
+pub type SegIndex = HashMap<String, u64>;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Manifest {
