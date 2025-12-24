@@ -46,7 +46,10 @@ impl EnsoDB {
             Ok(offset) => {
                 let seg = self.active_segment();
                 let seg_idx = self.get_or_load_seg_index(&seg);
-                seg_idx.insert(key, offset);
+                seg_idx.insert(key.clone(), offset);
+                // let name = &seg[..seg.rfind('.').unwrap()];
+                // let idx_path = format!("data/index/{}.idx", name);
+                // let _ = Storage::append_idx_entry(&idx_path, &key, offset);
             },
             Err(e) => println!("[EnsoDB error] Error while appending: {}", e),
         }
@@ -78,16 +81,39 @@ impl EnsoDB {
     //     }
     // }
 
+    // pub fn get<T: DeserializeOwned>(&mut self, key: String) -> Option<T> {
+    //     let seg = self.active_segment();
+    //     let seg_idx = self.get_or_load_seg_index(&seg);
+    //
+    //     let offset = seg_idx.get(&key)?.clone();
+    //     let record = self.storage.read_at(offset).ok()?;
+    //
+    //     if record.deleted { return None; }
+    //
+    //     Some(from_bytes(&record.value))
+    // }
+
     pub fn get<T: DeserializeOwned>(&mut self, key: String) -> Option<T> {
-        let seg = self.active_segment();
-        let seg_idx = self.get_or_load_seg_index(&seg);
+        let segments: Vec<String> = self.storage.manifest.segments.iter().cloned().collect();
+        for seg in segments.into_iter().rev() {
+            let seg_idx = self.get_or_load_seg_index(&seg);
 
-        let offset = seg_idx.get(&key)?.clone();
-        let record = self.storage.read_at(offset).ok()?;
+            if let Some(offset) = seg_idx.get(&key).copied() {
+                match self.storage.read_from_segment(&seg, offset) {
+                    Ok(record) => {
+                        if record.deleted {
+                            return None;
+                        }
 
-        if record.deleted { return None; }
+                        let value: T = from_bytes(&record.value);
+                        return Some(value);
+                    },
+                    Err(_) => return None,
+                }
+            }
+        }
 
-        Some(from_bytes(&record.value))
+        None
     }
 
     pub fn delete(&mut self, key: String) {
@@ -98,7 +124,10 @@ impl EnsoDB {
             Ok(offset) => {
                 let seg = self.active_segment();
                 let seg_idx = self.get_or_load_seg_index(&seg);
-                seg_idx.insert(key, offset);
+                seg_idx.insert(key.clone(), offset);
+                // let name = &seg[..seg.rfind('.').unwrap()];
+                // let idx_path = format!("data/index/{}.idx", name);
+                // let _ = Storage::append_idx_entry(&idx_path, &key, offset);
             },
             Err(e) => println!("[EnsoDB error] Error while deleting: {}", e),
         }

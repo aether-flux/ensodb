@@ -5,7 +5,7 @@ use lru::LruCache;
 use crate::{record::Record, types::{Manifest, SegIndex}, utils::decode_u32};
 
 // const MAX_FILE_SIZE: u64 = 10 * 1000 * 1000;
-const MAX_FILE_SIZE: u64 = 400;
+const MAX_FILE_SIZE: u64 = 190;
 
 pub struct Storage {
     file: std::fs::File,
@@ -15,7 +15,7 @@ pub struct Storage {
 impl Storage {
     pub fn new() -> Self {
         let manifest_path = "data/manifest.json";
-        std::fs::create_dir_all("data/index").unwrap();
+        // std::fs::create_dir_all("data/index").unwrap();
 
         let manifest = if Path::new(manifest_path).exists() {
             let data = std::fs::read_to_string(manifest_path).unwrap();
@@ -34,8 +34,16 @@ impl Storage {
             manifest
         };
 
+        // Create idx file(s)
+        std::fs::create_dir_all("data/index").unwrap();
+        let idx_path = format!("data/index/{}.idx", manifest.active_segment.trim_end_matches(".log"));
+        if !Path::new(&idx_path).exists() {
+            File::create(idx_path).unwrap();
+        }
+
+        // Create segment file
         let active_path = format!("data/segments/{}", manifest.active_segment);
-        let mut file = OpenOptions::new()
+        let file = OpenOptions::new()
             .read(true)
             .append(true)
             .create(true)
@@ -113,6 +121,17 @@ impl Storage {
         format!("data/index/{}.idx", name)
     }
 
+    fn next_segment_name(&self) -> String {
+        let last = self.manifest.segments.last().unwrap();
+        let num: u32 = last
+            .trim_start_matches("enso-")
+            .trim_end_matches(".log")
+            .parse()
+            .unwrap();
+
+        format!("enso-{:04}.log", num+1)
+    }
+
     // pub fn rebuild_index(&mut self) -> std::io::Result<HashMap<String, u64>> {
     //     let mut index = HashMap::new();
     //     self.file.seek(SeekFrom::Start(0))?;
@@ -149,6 +168,32 @@ impl Storage {
     //
     //     Ok(index)
     // }
+
+    fn rotate_segment(&mut self) -> std::io::Result<()> {
+        let new_seg = self.next_segment_name();
+
+        // create new segment file
+        let seg_path = format!("data/segments/{}", new_seg);
+        let file = OpenOptions::new()
+            .read(true)
+            .append(true)
+            .create(true)
+            .open(&seg_path)?;
+
+        // create index file
+        let idx_path = format!("data/index/{}.idx", new_seg.trim_end_matches(".log"));
+        File::create(idx_path)?;
+
+        // update manifest
+        self.manifest.segments.push(new_seg.clone());
+        self.manifest.active_segment = new_seg;
+        self.save_manifest();
+
+        // switch active file
+        self.file = file;
+
+        Ok(())
+    }
 
     // -> File compaction if size exceeds threshold
     pub fn compact(&mut self) -> std::io::Result<()> {
@@ -207,24 +252,22 @@ impl Storage {
 
     // -> Append data (record) to end of log file, returns offset
     pub fn append(&mut self, record: &Record) -> std::io::Result<u64> {
-        // Calculate offset (current length of file)
-        let offset = self.file.seek(SeekFrom::End(0))?;
+        let record_bytes = record.serialize();
+        let cur_size = self.file.metadata()?.len();
 
-        // Serialize record and append to the file
-        // let encoded_data = record.serialize();
-        // self.file.write_all(&encoded_data).unwrap();
-        self.file.write_all(&record.serialize())?;
+        // Check if appending would overflow file size threshold
+        if cur_size + record_bytes.len() as u64 > MAX_FILE_SIZE {
+            self.rotate_segment()?;
+        }
+
+        // Append to log
+        let offset = self.file.seek(SeekFrom::End(0))?;
+        self.file.write_all(&record_bytes)?;
         self.file.flush()?;
 
         // Write index entry
         let idx_path = self.active_idx_path();
         Self::append_idx_entry(&idx_path, &record.key, offset)?;
-
-        // Check file size
-        let size = std::fs::metadata(format!("data/segments/{}", &self.manifest.active_segment))?.len();
-        if size > MAX_FILE_SIZE {
-            self.compact()?;
-        }
 
         Ok(offset as u64)
     }
@@ -245,6 +288,30 @@ impl Storage {
         let mut buf = vec![0u8; record_len];
         self.file.seek(SeekFrom::Start(offset))?;
         self.file.read_exact(&mut buf)?;
+        
+        Ok(Record::deserialize(&buf))
+    }
+
+    pub fn read_from_segment(&mut self, seg: &str, offset: u64) -> std::io::Result<Record> {
+        let seg_path = format!("data/segments/{}", seg);
+        let mut seg_file = OpenOptions::new()
+            .read(true)
+            .open(seg_path)?;
+
+        seg_file.seek(SeekFrom::Start(offset))?;
+        
+        // first read header (16 bytes)
+        let mut header = [0u8; 17];
+        seg_file.read_exact(&mut header)?;
+        
+        let key_len = decode_u32(&header[0..4]) as usize;
+        let val_len = decode_u32(&header[4..8]) as usize;
+        let record_len = 17 + key_len + val_len;
+        
+        // now read the rest
+        let mut buf = vec![0u8; record_len];
+        seg_file.seek(SeekFrom::Start(offset))?;
+        seg_file.read_exact(&mut buf)?;
         
         Ok(Record::deserialize(&buf))
     }
