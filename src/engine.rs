@@ -1,39 +1,87 @@
-use std::{collections::HashMap, num::NonZeroUsize, time::{SystemTime, UNIX_EPOCH}};
+use std::{collections::HashMap, num::NonZeroUsize, sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex}, time::{SystemTime, UNIX_EPOCH}};
 use lru::LruCache;
 use serde::{de::DeserializeOwned, Serialize};
 use crate::{record::Record, storage::Storage, types::SegIndex, utils::{from_bytes, to_bytes}};
 
+// const MAX_SEGMENTS: usize = 50;
+const MAX_SEGMENTS: usize = 3;
+
 pub struct EnsoDB {
-    pub storage: Storage,
-    // pub index: HashMap<String, u64>,
+    pub storage: Arc<Mutex<Storage>>,
     pub index: LruCache<String, SegIndex>,
+    compaction_running: Arc<AtomicBool>,
 }
 
 impl EnsoDB {
     pub fn new() -> Self {
         let mut storage = Storage::new();
-        match storage.rebuild_index() {
-            Ok(index) => Self { storage, index },
-            Err(e) => {
-                println!("[EnsoDB error] Error rebuilding index: {}", e);
-                Self { storage, index: LruCache::new(NonZeroUsize::new(4).unwrap()) }
-            },
+        let index = storage.rebuild_index().unwrap_or_else(|_| LruCache::new(NonZeroUsize::new(4).unwrap()));
+        
+        Self {
+            storage: Arc::new(Mutex::new(storage)),
+            index,
+            compaction_running: Arc::new(AtomicBool::new(false)),
         }
     }
 
     fn active_segment(&self) -> String {
-        self.storage.manifest.active_segment.clone()
+        let storage = self.storage.lock().unwrap();
+        storage.manifest.active_segment.clone()
     }
 
     fn get_or_load_seg_index(&mut self, seg: &str) -> &mut SegIndex {
         if !self.index.contains(seg) {
             let name = &seg[..seg.rfind('.').unwrap()];
             let idx_path = format!("data/index/{}.idx", name);
-            let map = self.storage.load_idx(&idx_path).unwrap_or_default();
+            let mut storage = self.storage.lock().unwrap();
+            let map = storage.load_idx(&idx_path).unwrap_or_default();
             self.index.put(seg.to_string(), map);
         }
 
         self.index.get_mut(seg).unwrap()
+    }
+
+    fn maybe_compact(&mut self) {
+        // return if compaction already running
+        if self.compaction_running.swap(true, Ordering::SeqCst) {
+            return;
+        }
+
+        let seg_count = {
+            let storage = self.storage.lock().unwrap();
+            storage.manifest.segments.len()
+        };
+        if seg_count <= MAX_SEGMENTS {
+            return;
+        }
+
+        let storage = Arc::clone(&self.storage);
+        let compaction_flag = Arc::clone(&self.compaction_running);
+
+        std::thread::spawn(move || {
+            let result = {
+                let mut storage = storage.lock().unwrap();
+                storage.compact_segments()
+            };
+
+            if let Err(e) = result {
+                eprintln!("[EnsoDB] Compaction failed: {}", e);
+            }
+
+            compaction_flag.store(false, Ordering::SeqCst);
+        });
+
+        // match self.storage.compact_segments() {
+        //     Ok(removed) => {
+        //         // clean up LRU index/cache
+        //         for seg in removed {
+        //             self.index.pop(&seg);
+        //         }
+        //     }
+        //     Err(e) => {
+        //         eprintln!("[EnsoDB] Compaction failed: {}", e);
+        //     }
+        // }
     }
 
     pub fn set<T: Serialize>(&mut self, key: String, value: T) {
@@ -41,18 +89,35 @@ impl EnsoDB {
 
         let encoded_value = to_bytes(&value);
         let record = Record::new(key.clone(), encoded_value, now, false);
+        // let mut storage = self.storage.lock().unwrap();
 
-        match self.storage.append(&record) {
-            Ok(offset) => {
-                let seg = self.active_segment();
-                let seg_idx = self.get_or_load_seg_index(&seg);
-                seg_idx.insert(key.clone(), offset);
-                // let name = &seg[..seg.rfind('.').unwrap()];
-                // let idx_path = format!("data/index/{}.idx", name);
-                // let _ = Storage::append_idx_entry(&idx_path, &key, offset);
-            },
-            Err(e) => println!("[EnsoDB error] Error while appending: {}", e),
+        let offset = {
+            let mut storage = self.storage.lock().unwrap();
+            storage.append(&record)
+        };
+
+        if let Err(e) = offset {
+            eprintln!("[EnsoDB error] Error while storing: {}", e);
+        } else {
+            let seg = self.active_segment();
+            let seg_idx = self.get_or_load_seg_index(&seg);
+            seg_idx.insert(key.clone(), offset.unwrap());
+
+            // check for compaction
+            self.maybe_compact();
         }
+
+        // match storage.append(&record) {
+        //     Ok(offset) => {
+        //         let seg = self.active_segment();
+        //         let seg_idx = self.get_or_load_seg_index(&seg);
+        //         seg_idx.insert(key.clone(), offset);
+        //
+        //         // check for compaction
+        //         self.maybe_compact();
+        //     },
+        //     Err(e) => println!("[EnsoDB error] Error while appending: {}", e),
+        // }
     }
 
     // pub fn get<T: DeserializeOwned>(&mut self, key: String) -> Option<T> {
@@ -94,12 +159,17 @@ impl EnsoDB {
     // }
 
     pub fn get<T: DeserializeOwned>(&mut self, key: String) -> Option<T> {
-        let segments: Vec<String> = self.storage.manifest.segments.iter().cloned().collect();
+        // let segments: Vec<String> = storage.manifest.segments.iter().cloned().collect();
+        let segments = {
+            let storage = self.storage.lock().unwrap();
+            storage.manifest.segments.clone()
+        };
         for seg in segments.into_iter().rev() {
             let seg_idx = self.get_or_load_seg_index(&seg);
 
             if let Some(offset) = seg_idx.get(&key).copied() {
-                match self.storage.read_from_segment(&seg, offset) {
+                let mut storage = self.storage.lock().unwrap();
+                match storage.read_from_segment(&seg, offset) {
                     Ok(record) => {
                         if record.deleted {
                             return None;
@@ -120,16 +190,32 @@ impl EnsoDB {
         let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs();
         let record = Record::new(key.clone(), vec![0; 17], now, true);
 
-        match self.storage.append(&record) {
-            Ok(offset) => {
-                let seg = self.active_segment();
-                let seg_idx = self.get_or_load_seg_index(&seg);
-                seg_idx.insert(key.clone(), offset);
-                // let name = &seg[..seg.rfind('.').unwrap()];
-                // let idx_path = format!("data/index/{}.idx", name);
-                // let _ = Storage::append_idx_entry(&idx_path, &key, offset);
-            },
-            Err(e) => println!("[EnsoDB error] Error while deleting: {}", e),
+        let offset = {
+            let mut storage = self.storage.lock().unwrap();
+            storage.append(&record)
+        };
+
+        if let Err(e) = offset {
+            eprintln!("[EnsoDB error] Error while deleting: {}", e);
+        } else {
+            let seg = self.active_segment();
+            let seg_idx = self.get_or_load_seg_index(&seg);
+            seg_idx.insert(key.clone(), offset.unwrap());
+
+            // check for compaction
+            self.maybe_compact();
         }
+
+        // match self.storage.append(&record) {
+        //     Ok(offset) => {
+        //         let seg = self.active_segment();
+        //         let seg_idx = self.get_or_load_seg_index(&seg);
+        //         seg_idx.insert(key.clone(), offset);
+        //
+        //         // check for compaction
+        //         self.maybe_compact();
+        //     },
+        //     Err(e) => println!("[EnsoDB error] Error while deleting: {}", e),
+        // }
     }
 }

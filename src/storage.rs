@@ -1,11 +1,11 @@
-use std::{collections::HashMap, fs::{File, OpenOptions}, io::{Read, Seek, SeekFrom, Write}, num::NonZeroUsize};
+use std::{collections::HashMap, fs::{rename, File, OpenOptions}, io::{Read, Seek, SeekFrom, Write}, num::NonZeroUsize};
 use std::path::Path;
 use chrono::Utc;
 use lru::LruCache;
 use crate::{record::Record, types::{Manifest, SegIndex}, utils::decode_u32};
 
 // const MAX_FILE_SIZE: u64 = 10 * 1000 * 1000;
-const MAX_FILE_SIZE: u64 = 190;
+const MAX_FILE_SIZE: u64 = 111;
 
 pub struct Storage {
     file: std::fs::File,
@@ -196,14 +196,17 @@ impl Storage {
     }
 
     // -> File compaction if size exceeds threshold
-    pub fn compact(&mut self) -> std::io::Result<()> {
-        let mut records = HashMap::new();
+    fn read_seg_into_map(seg: &str, mut records: HashMap<String, Record>) -> std::io::Result<HashMap<String, Record>> {
+        let mut file = OpenOptions::new()
+            .read(true)
+            .open(format!("data/segments/{}", seg))?;
+        // let mut records = HashMap::new();
 
-        self.file.seek(SeekFrom::Start(0))?;
+        file.seek(SeekFrom::Start(0))?;
         loop {
             // first read header (16 bytes)
             let mut header = [0u8; 17];
-            if self.file.read_exact(&mut header).is_err() { break; }
+            if file.read_exact(&mut header).is_err() { break; }
             
             let key_len = decode_u32(&header[0..4]) as usize;
             let val_len = decode_u32(&header[4..8]) as usize;
@@ -211,7 +214,7 @@ impl Storage {
             
             // now read the rest
             let mut buf = vec![0u8; record_len-17];
-            self.file.read_exact(&mut buf)?;
+            file.read_exact(&mut buf)?;
 
             // reconstruct full buffer
             let mut full = Vec::new();
@@ -224,30 +227,73 @@ impl Storage {
                 records.insert(record.key.clone(), record);
             }
         }
+        
+        Ok(records)
+    }
 
-        // create temporary file
-        let active_segment = &self.manifest.active_segment;
-        let active_segment = &active_segment[..active_segment.rfind('.').unwrap()];
-        let tmp_path = format!("data/segments/{}.tmp", active_segment);
-        let mut tmp_file = File::create(tmp_path.clone())?;
+    fn write_compacted_records(name: &str, records: HashMap<String, Record>) -> std::io::Result<()> {
+        // create temp files
+        let mut tmp_log_file = File::create(format!("data/segments/{}.log.tmp", name))?;
+        let mut tmp_idx_file = File::create(format!("data/index/{}.idx.tmp", name))?;
 
-        // write 
-        for record in records.values() {
-            tmp_file.write_all(&record.serialize())?;
+        for (key, record) in records.iter() {
+            // write record to tmp log
+            let record_bytes = &record.serialize();
+            let offset = tmp_log_file.seek(SeekFrom::End(0))?;
+            tmp_log_file.write_all(&record_bytes)?;
+            tmp_log_file.flush()?;
+
+            // write offset to tmp idx
+            tmp_idx_file.write_all(&(key.len() as u32).to_be_bytes())?;
+            tmp_idx_file.write_all(key.as_bytes())?;
+            tmp_idx_file.write_all(&offset.to_be_bytes())?;
+            tmp_idx_file.flush()?;
         }
-        tmp_file.flush()?;
 
-        std::fs::rename(tmp_path, format!("data/segments/{}.log", active_segment))?;
+        // atomic swap
+        tmp_log_file.sync_all()?;
+        tmp_idx_file.sync_all()?;
 
-        self.manifest.last_compaction = Some(Utc::now().to_rfc3339());
+        rename(format!("data/segments/{}.log.tmp", name), format!("data/segments/{}.log", name))?;
+        rename(format!("data/index/{}.idx.tmp", name), format!("data/index/{}.idx", name))?;
+
+        // Ok(format!("data/segments/{}.log", name))
+        Ok(())
+    }
+
+    pub fn compact_segments(&mut self) -> std::io::Result<Vec<String>> {
+        println!("Compacting...");
+        let segments = &self.manifest.segments;
+        let segments: Vec<String> = segments.iter().filter(|&s| s.to_string() != self.manifest.active_segment).cloned().collect();
+        if segments.len() < 2 { return Ok(vec![]); }
+
+        // compress all segments into one map
+        let mut records: HashMap<String, Record> = HashMap::new();
+        for seg in segments.iter().clone() {
+            records = Self::read_seg_into_map(&seg, records)?;
+        }
+
+        // write to new segment
+        // let name = &segments[0][..segments[0].rfind('.').unwrap()];
+        // let name = format!("{}-compacted", name);
+        let name = self.next_segment_name();
+        Self::write_compacted_records(&name[..name.rfind('.').unwrap()], records)?;
+
+        self.manifest.segments.retain(|s| !segments.contains(s));
+        self.manifest.segments.push(name);
         self.save_manifest();
 
-        self.file = OpenOptions::new()
-            .read(true)
-            .append(true)
-            .open(format!("data/segments/{}.log", active_segment))?;
+        // delete old segments
+        for seg in segments.clone() {
+            let seg_name = &seg[..seg.rfind('.').unwrap()];
+            let _ = std::fs::remove_file(format!("data/segments/{}.log", seg_name));
+            let _ = std::fs::remove_file(format!("data/index/{}.idx", seg_name));
 
-        Ok(())
+            // cleanup LRU cache/index
+            // self.index.pop(&seg_name);
+        }
+
+        Ok(segments)
     }
 
     // -> Append data (record) to end of log file, returns offset

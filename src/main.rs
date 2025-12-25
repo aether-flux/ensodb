@@ -23,7 +23,7 @@ fn main() {
     #[derive(serde::Serialize, serde::Deserialize, Debug)]
     struct User { id: u32, name: String }
 
-    for i in 0..15 {
+    for i in 0..17 {
         db.set("user".to_string(), User { id: i as u32, name: "enso".into() });
     }
 
@@ -39,7 +39,7 @@ fn main() {
     // println!("{:?}", db.get::<User>("user-29".to_string()));
     // println!("{:?}", db.get::<User>("user-15".to_string()));
     // println!("{:?}", db.get::<User>("user-0".to_string()));
-    println!("{:?}", db.get::<User>("user".to_string()));
+    // println!("{:?}", db.get::<User>("user".to_string()));
 
     // db.delete("pi".to_string());
 
