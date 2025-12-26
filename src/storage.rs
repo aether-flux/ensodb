@@ -236,6 +236,8 @@ impl Storage {
         let mut tmp_log_file = File::create(format!("data/segments/{}.log.tmp", name))?;
         let mut tmp_idx_file = File::create(format!("data/index/{}.idx.tmp", name))?;
 
+        let mut records: Vec<_> = records.into_iter().collect();
+        records.sort_by(|a, b| a.0.cmp(&b.0));
         for (key, record) in records.iter() {
             // write record to tmp log
             let record_bytes = &record.serialize();
@@ -261,15 +263,15 @@ impl Storage {
         Ok(())
     }
 
-    pub fn compact_segments(&mut self) -> std::io::Result<Vec<String>> {
-        println!("Compacting...");
+    pub fn compact_segments(&mut self) -> std::io::Result<(Vec<String>, String)> {
+        // println!("Compacting start...");
         let segments = &self.manifest.segments;
         let segments: Vec<String> = segments.iter().filter(|&s| s.to_string() != self.manifest.active_segment).cloned().collect();
-        if segments.len() < 2 { return Ok(vec![]); }
+        if segments.len() < 2 { return Ok((vec![], String::new())); }
 
         // compress all segments into one map
         let mut records: HashMap<String, Record> = HashMap::new();
-        for seg in segments.iter().clone() {
+        for seg in segments.iter().rev().clone() {
             records = Self::read_seg_into_map(&seg, records)?;
         }
 
@@ -278,10 +280,14 @@ impl Storage {
         // let name = format!("{}-compacted", name);
         let name = self.next_segment_name();
         Self::write_compacted_records(&name[..name.rfind('.').unwrap()], records)?;
+        // println!("New segment created");
 
+        let timestamp = Utc::now();
         self.manifest.segments.retain(|s| !segments.contains(s));
-        self.manifest.segments.push(name);
+        self.manifest.segments.push(name.clone());
+        self.manifest.last_compaction = Some(timestamp.to_string());
         self.save_manifest();
+        // println!("Manifest saved");
 
         // delete old segments
         for seg in segments.clone() {
@@ -293,7 +299,9 @@ impl Storage {
             // self.index.pop(&seg_name);
         }
 
-        Ok(segments)
+        // println!("Compacting end...");
+
+        Ok((segments, name))
     }
 
     // -> Append data (record) to end of log file, returns offset
@@ -361,9 +369,4 @@ impl Storage {
         
         Ok(Record::deserialize(&buf))
     }
-
-    // -> Delete data by adding a record with deleted:true
-    // pub fn delete_key(&mut self, key: String) -> std::io::Result<u64> {
-    //
-    // }
 }

@@ -1,3 +1,5 @@
+use std::time;
+
 use engine::EnsoDB;
 
 mod record;
@@ -25,6 +27,8 @@ fn main() {
 
     for i in 0..17 {
         db.set("user".to_string(), User { id: i as u32, name: "enso".into() });
+        // println!("Pass-{}", i);
+        // std::thread::sleep(time::Duration::from_secs(2));
     }
 
     // println!("{:#?}", db.storage.manifest);
@@ -39,7 +43,7 @@ fn main() {
     // println!("{:?}", db.get::<User>("user-29".to_string()));
     // println!("{:?}", db.get::<User>("user-15".to_string()));
     // println!("{:?}", db.get::<User>("user-0".to_string()));
-    // println!("{:?}", db.get::<User>("user".to_string()));
+    println!("{:?}", db.get::<User>("user".to_string()));
 
     // db.delete("pi".to_string());
 
