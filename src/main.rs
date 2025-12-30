@@ -1,16 +1,19 @@
 use std::time;
 
-use engine::EnsoDB;
+use engine::Engine;
 
 mod record;
 mod storage;
 mod utils;
 mod engine;
 mod types;
-mod tests;
+mod api;
+mod schema;
+mod error;
+mod codec;
 
 fn main() {
-    let mut db = EnsoDB::new();
+    // let mut db = EnsoDB::new();
 
     // // simple string
     // db.set("greeting".to_string(), "hello world".to_string());
@@ -25,11 +28,11 @@ fn main() {
     #[derive(serde::Serialize, serde::Deserialize, Debug)]
     struct User { id: u32, name: String }
 
-    for i in 0..17 {
-        db.set("user".to_string(), User { id: i as u32, name: "enso".into() });
-        // println!("Pass-{}", i);
-        // std::thread::sleep(time::Duration::from_secs(2));
-    }
+    // for i in 0..17 {
+    //     db.set("user".to_string(), User { id: i as u32, name: "enso".into() });
+    //     println!("Pass-{}", i);
+    //     std::thread::sleep(time::Duration::from_secs(2));
+    // }
 
     // println!("{:#?}", db.storage.manifest);
 
@@ -43,7 +46,7 @@ fn main() {
     // println!("{:?}", db.get::<User>("user-29".to_string()));
     // println!("{:?}", db.get::<User>("user-15".to_string()));
     // println!("{:?}", db.get::<User>("user-0".to_string()));
-    println!("{:?}", db.get::<User>("user".to_string()));
+    // println!("{:?}", db.get::<User>("user".to_string()));
 
     // db.delete("pi".to_string());
 

@@ -6,13 +6,13 @@ use crate::{record::Record, storage::Storage, types::SegIndex, utils::{from_byte
 // const MAX_SEGMENTS: usize = 50;
 const MAX_SEGMENTS: usize = 3;
 
-pub struct EnsoDB {
+pub struct Engine {
     pub storage: Arc<Mutex<Storage>>,
     pub index: Arc<RwLock<LruCache<String, SegIndex>>>,
     compaction_running: Arc<AtomicBool>,
 }
 
-impl EnsoDB {
+impl Engine {
     pub fn new() -> Self {
         let mut storage = Storage::new();
         let index = Arc::new(RwLock::new(
@@ -122,12 +122,90 @@ impl EnsoDB {
         // }
     }
 
-    pub fn set<T: Serialize>(&mut self, key: String, value: T) {
+    // pub fn set<T: Serialize>(&mut self, key: String, value: T) {
+    //     let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs();
+    //
+    //     let encoded_value = to_bytes(&value);
+    //     let record = Record::new(key.clone(), encoded_value, now, false);
+    //     // let mut storage = self.storage.lock().unwrap();
+    //
+    //     let offset = {
+    //         let mut storage = self.storage.lock().unwrap();
+    //         storage.append(&record)
+    //     };
+    //
+    //     if let Err(e) = offset {
+    //         eprintln!("[EnsoDB error] Error while storing: {}", e);
+    //     } else {
+    //         let seg = self.active_segment();
+    //         self.ensure_seg_index_loaded(&seg);
+    //
+    //         {
+    //             let mut index = self.index.write().unwrap();
+    //             index.get_mut(&seg).unwrap().insert(key.clone(), offset.unwrap());
+    //         }
+    //
+    //         // check for compaction
+    //         self.maybe_compact();
+    //     }
+    // }
+
+    // pub fn get<T: DeserializeOwned>(&mut self, key: String) -> Option<T> {
+    //     // let segments: Vec<String> = storage.manifest.segments.iter().cloned().collect();
+    //     let segments = {
+    //         let storage = self.storage.lock().unwrap();
+    //         storage.manifest.segments.clone()
+    //     };
+    //     for seg in segments.into_iter().rev() {
+    //         // let seg_idx = self.get_or_load_seg_index(&seg);
+    //         self.ensure_seg_index_loaded(&seg);
+    //
+    //         let offset = {
+    //             let mut index = self.index.write().unwrap();
+    //             index.get(&seg)?.get(&key).copied()
+    //         };
+    //
+    //         if let Some(offset) = offset {
+    //             let mut storage = self.storage.lock().unwrap();
+    //             let record = storage.read_from_segment(&seg, offset).ok()?;
+    //             if record.deleted { return None; }
+    //             return Some(from_bytes(&record.value));
+    //         }
+    //
+    //     }
+    //
+    //     None
+    // }
+
+    // pub fn delete(&mut self, key: String) {
+    //     let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs();
+    //     let record = Record::new(key.clone(), vec![0; 17], now, true);
+    //
+    //     let offset = {
+    //         let mut storage = self.storage.lock().unwrap();
+    //         storage.append(&record)
+    //     };
+    //
+    //     if let Err(e) = offset {
+    //         eprintln!("[EnsoDB error] Error while deleting: {}", e);
+    //     } else {
+    //         let seg = self.active_segment();
+    //         self.ensure_seg_index_loaded(&seg);
+    //
+    //         {
+    //             let mut index = self.index.write().unwrap();
+    //             index.get_mut(&seg).unwrap().insert(key.clone(), offset.unwrap());
+    //         }
+    //
+    //         // check for compaction
+    //         self.maybe_compact();
+    //     }
+    // }
+
+    pub fn set_raw(&mut self, key: String, value: Vec<u8>) {
         let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs();
 
-        let encoded_value = to_bytes(&value);
-        let record = Record::new(key.clone(), encoded_value, now, false);
-        // let mut storage = self.storage.lock().unwrap();
+        let record = Record::new(key.clone(), value, now, false);
 
         let offset = {
             let mut storage = self.storage.lock().unwrap();
@@ -136,133 +214,17 @@ impl EnsoDB {
 
         if let Err(e) = offset {
             eprintln!("[EnsoDB error] Error while storing: {}", e);
-        } else {
-            let seg = self.active_segment();
-            self.ensure_seg_index_loaded(&seg);
-
-            {
-                let mut index = self.index.write().unwrap();
-                index.get_mut(&seg).unwrap().insert(key.clone(), offset.unwrap());
-            }
-
-            // check for compaction
-            self.maybe_compact();
+            return;
         }
 
-        // match storage.append(&record) {
-        //     Ok(offset) => {
-        //         let seg = self.active_segment();
-        //         let seg_idx = self.get_or_load_seg_index(&seg);
-        //         seg_idx.insert(key.clone(), offset);
-        //
-        //         // check for compaction
-        //         self.maybe_compact();
-        //     },
-        //     Err(e) => println!("[EnsoDB error] Error while appending: {}", e),
-        // }
-    }
+        let seg = self.active_segment();
+        self.ensure_seg_index_loaded(&seg);
 
-    // pub fn get<T: DeserializeOwned>(&mut self, key: String) -> Option<T> {
-    //     if let Some(offset) = self.index.get(&key) {
-    //         match self.storage.read_at(*offset) {
-    //             Ok(record) => {
-    //                 if record.deleted {
-    //                     println!("[EnsoDB error] Record not found in database");
-    //                     return None;
-    //                 }
-    //
-    //                 let value: T = from_bytes(&record.value);
-    //                 Some(value)
-    //             },
-    //             Err(e) => {
-    //                 println!("[EnsoDB error] Error while reading: {}", e);
-    //                 None
-    //             }
-    //         }
-    //     // } else if let Ok(record, offset) = self.search_in_log(key) { 
-    //     //     self.index.insert(key.to_string(), offset);
-    //     //     return Some(record.value);
-    //     } else {
-    //         println!("[EnsoDB error] Record not found in database");
-    //         None
-    //     }
-    // }
-
-    // pub fn get<T: DeserializeOwned>(&mut self, key: String) -> Option<T> {
-    //     let seg = self.active_segment();
-    //     let seg_idx = self.get_or_load_seg_index(&seg);
-    //
-    //     let offset = seg_idx.get(&key)?.clone();
-    //     let record = self.storage.read_at(offset).ok()?;
-    //
-    //     if record.deleted { return None; }
-    //
-    //     Some(from_bytes(&record.value))
-    // }
-
-    pub fn get<T: DeserializeOwned>(&mut self, key: String) -> Option<T> {
-        // let segments: Vec<String> = storage.manifest.segments.iter().cloned().collect();
-        let segments = {
-            let storage = self.storage.lock().unwrap();
-            storage.manifest.segments.clone()
-        };
-        for seg in segments.into_iter().rev() {
-            // let seg_idx = self.get_or_load_seg_index(&seg);
-            self.ensure_seg_index_loaded(&seg);
-
-            let offset = {
-                let mut index = self.index.write().unwrap();
-                index.get(&seg)?.get(&key).copied()
-            };
-
-            if let Some(offset) = offset {
-                let mut storage = self.storage.lock().unwrap();
-                let record = storage.read_from_segment(&seg, offset).ok()?;
-                if record.deleted { return None; }
-                return Some(from_bytes(&record.value));
-            }
-
-            // if let Some(offset) = seg_idx.get(&key).copied() {
-            //     let mut storage = self.storage.lock().unwrap();
-            //     match storage.read_from_segment(&seg, offset) {
-            //         Ok(record) => {
-            //             if record.deleted {
-            //                 return None;
-            //             }
-            //
-            //             let value: T = from_bytes(&record.value);
-            //             return Some(value);
-            //         },
-            //         Err(_) => return None,
-            //     }
-            // }
+        {
+            let mut index = self.index.write().unwrap();
+            index.get_mut(&seg).unwrap().insert(key, offset.unwrap());
         }
 
-        None
-    }
-
-    pub fn delete(&mut self, key: String) {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs();
-        let record = Record::new(key.clone(), vec![0; 17], now, true);
-
-        let offset = {
-            let mut storage = self.storage.lock().unwrap();
-            storage.append(&record)
-        };
-
-        if let Err(e) = offset {
-            eprintln!("[EnsoDB error] Error while deleting: {}", e);
-        } else {
-            let seg = self.active_segment();
-            self.ensure_seg_index_loaded(&seg);
-
-            {
-                let mut index = self.index.write().unwrap();
-                index.get_mut(&seg).unwrap().insert(key.clone(), offset.unwrap());
-            }
-
-            // check for compaction
-            self.maybe_compact();
-        }
+        self.maybe_compact();
     }
 }
