@@ -65,9 +65,11 @@ impl Enso {
     }
 
     // -> Insert into active/current table (set using use_table())
-    pub fn insert(&mut self, row: Vec<Value>) -> Result<(), DbError> {
+    pub fn insert<V>(&mut self, row: Vec<V>) -> Result<(), DbError>
+    where V: Into<Value> {
         let table = self.table.as_ref().ok_or(DbError::NoTableSelected)?;
         let db = self.db.as_ref().ok_or(DbError::NoDatabaseSelected)?;
+        let row: Vec<Value> = row.into_iter().map(Into::into).collect();
 
         // get schema
         let schema = self.schema.get(db, table)?;
@@ -98,8 +100,10 @@ impl Enso {
     }
 
     // -> Insert into specified table
-    pub fn insert_into(&mut self, table: &str, row: Vec<Value>) -> Result<(), DbError> {
+    pub fn insert_into<V>(&mut self, table: &str, row: Vec<V>) -> Result<(), DbError>
+    where V: Into<Value> {
         let db = self.db.as_ref().ok_or(DbError::NoDatabaseSelected)?;
+        let row: Vec<Value> = row.into_iter().map(Into::into).collect();
 
         // get schema
         let schema = self.schema.get(db, table)?;
@@ -130,8 +134,68 @@ impl Enso {
     }
 
     // -> Select/fetch all rows
-    pub fn select_all() {}
+    pub fn select_all(&mut self) -> Result<Vec<Vec<Value>>, DbError> {
+        let db = self.db.as_ref().ok_or(DbError::NoDatabaseSelected)?;
+        let table = self.table.as_ref().ok_or(DbError::NoTableSelected)?;
+        let schema = self.schema.get(&db, &table)?;
+
+        let prefix = format!("{}:{}:", db, table);
+        let mut rows = Vec::new();
+
+        for (key, value) in self.engine.scan_prefix(&prefix) {
+            let row = RowCodec::decode(&value, schema)?;
+            rows.push(row);
+        }
+
+        Ok(rows)
+    }
 
     // -> Select all rows from specified table
-    pub fn select_all_from() {}
+    pub fn select_all_from(&mut self, table: &str) -> Result<Vec<Vec<Value>>, DbError> {
+        let db = self.db.as_ref().ok_or(DbError::NoDatabaseSelected)?;
+        let schema = self.schema.get(&db, &table)?;
+
+        let prefix = format!("{}:{}:", db, table);
+        let mut rows = Vec::new();
+
+        for (key, value) in self.engine.scan_prefix(&prefix) {
+            let row = RowCodec::decode(&value, schema)?;
+            rows.push(row);
+        }
+
+        Ok(rows)
+    }
+
+    // -> Select row by primary key 
+    pub fn select_by_pk(&mut self, pk: Value) -> Result<Option<Vec<Value>>, DbError> {
+        let db = self.db.as_ref().ok_or(DbError::NoDatabaseSelected)?;
+        let table = self.table.as_ref().ok_or(DbError::NoTableSelected)?;
+        let schema = self.schema.get(&db, &table)?;
+
+        let key = format!("{}:{}:{}", db, table, pk);
+
+        match self.engine.get_raw(&key) {
+            Some(bytes) => {
+                let row = RowCodec::decode(&bytes, schema)?;
+                Ok(Some(row))
+            },
+            None => Ok(None),
+        }
+    }
+
+    // -> Select row by primary key from specified table
+    pub fn select_by_pk_from(&mut self, table: &str, pk: Value) -> Result<Option<Vec<Value>>, DbError> {
+        let db = self.db.as_ref().ok_or(DbError::NoDatabaseSelected)?;
+        let schema = self.schema.get(&db, &table)?;
+
+        let key = format!("{}:{}:{}", db, table, pk);
+
+        match self.engine.get_raw(&key) {
+            Some(bytes) => {
+                let row = RowCodec::decode(&bytes, schema)?;
+                Ok(Some(row))
+            },
+            None => Ok(None),
+        }
+    }
 }

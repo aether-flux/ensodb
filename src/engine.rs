@@ -1,4 +1,4 @@
-use std::{collections::HashMap, num::NonZeroUsize, sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex, RwLock}, time::{SystemTime, UNIX_EPOCH}};
+use std::{collections::{HashMap, HashSet}, num::NonZeroUsize, sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex, RwLock}, time::{SystemTime, UNIX_EPOCH}};
 use lru::LruCache;
 use serde::{de::DeserializeOwned, Serialize};
 use crate::{record::Record, storage::Storage, types::SegIndex, utils::{from_bytes, to_bytes}};
@@ -226,5 +226,79 @@ impl Engine {
         }
 
         self.maybe_compact();
+    }
+
+    pub fn get_raw(&self, key: &str) -> Option<Vec<u8>> {
+        let segments = {
+            let storage = self.storage.lock().unwrap();
+            storage.manifest.segments.clone()
+        };
+
+        for seg in segments.into_iter().rev() {
+            self.ensure_seg_index_loaded(&seg);
+
+            let offset = {
+                let mut index = self.index.write().unwrap();
+                index.get(&seg)?.get(key).copied()
+            };
+
+            if let Some(offset) = offset {
+                let mut storage = self.storage.lock().unwrap();
+                let record = storage.read_from_segment(&seg, offset).ok()?;
+                if record.deleted {
+                    return None;
+                }
+                return Some(record.value);
+            }
+        }
+
+        None
+    }
+
+    pub fn scan_prefix(&self, prefix: &str) -> Vec<(String, Vec<u8>)> {
+        let segments = {
+            let storage = self.storage.lock().unwrap();
+            storage.manifest.segments.clone()
+        };
+
+        let mut seen = HashSet::new();
+        let mut results = Vec::new();
+
+        for seg in segments.into_iter().rev() {
+            self.ensure_seg_index_loaded(&seg);
+
+            let offsets = {
+                let mut index = self.index.write().unwrap();
+                match index.get(&seg) {
+                    Some(map) => map.clone(),
+                    None => continue,
+                }
+            };
+
+            for (key, offset) in offsets {
+                if !key.starts_with(prefix) {
+                    continue;
+                }
+
+                if seen.contains(&key) {
+                    continue;
+                }
+
+                let record = {
+                    let mut storage = self.storage.lock().unwrap();
+                    storage.read_from_segment(&seg, offset)
+                };
+
+                if let Ok(record) = record {
+                    seen.insert(key.clone());
+
+                    if !record.deleted {
+                        results.push((key, record.value));
+                    }
+                }
+            }
+        }
+
+        results
     }
 }
