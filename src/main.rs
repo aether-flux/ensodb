@@ -1,6 +1,8 @@
 use std::time;
 
+use api::Enso;
 use engine::Engine;
+use types::{Column, Value};
 
 mod record;
 mod storage;
@@ -13,48 +15,26 @@ mod error;
 mod codec;
 
 fn main() {
-    // let mut db = EnsoDB::new();
-
-    // // simple string
-    // db.set("greeting".to_string(), "hello world".to_string());
-    // 
-    // // integer
-    // db.set("year".to_string(), 2025u32);
-    // 
-    // // float
-    // db.set("pi".to_string(), 3.14159f64);
-    
     // struct
-    #[derive(serde::Serialize, serde::Deserialize, Debug)]
-    struct User { id: u32, name: String }
+    // #[derive(serde::Serialize, serde::Deserialize, Debug)]
+    // struct User { id: u32, name: String }
 
-    // for i in 0..17 {
-    //     db.set("user".to_string(), User { id: i as u32, name: "enso".into() });
-    //     println!("Pass-{}", i);
-    //     std::thread::sleep(time::Duration::from_secs(2));
-    // }
+    let mut db = Enso::open("test_db").unwrap();
 
-    // println!("{:#?}", db.storage.manifest);
+    db.create_table(
+        "users",
+        schema! {
+            id: Int => pk,
+            name: String,
+            age: Int,
+        }
+    ).unwrap();
 
-    // println!("");
-    // for (k, v) in db.index.iter() {
-    //     println!("Key: {}, value: {:?}", k, v);
-    // }
-    // println!("");
+    db.insert(row![1, "amartya", 24]).unwrap();
 
-    // println!("{:?}", db.get::<User>("user-24".to_string()));
-    // println!("{:?}", db.get::<User>("user-29".to_string()));
-    // println!("{:?}", db.get::<User>("user-15".to_string()));
-    // println!("{:?}", db.get::<User>("user-0".to_string()));
-    // println!("{:?}", db.get::<User>("user".to_string()));
+    let row = db.select_by_pk(1).unwrap().unwrap();
+    println!("Row: {:?}", row);
 
-    // db.delete("pi".to_string());
-
-    // println!("Index: {:#?}", db.index);
-
-    // println!("{:?}", db.get::<String>("greeting".to_string()));
-    // println!("{:?}", db.get::<u32>("year".to_string()));
-    // println!("{:?}", db.get::<f64>("pi".to_string()));
-    // println!("{:?}", db.get::<User>("user".to_string()));
-    // println!("{:?}", db.get::<String>("test".to_string()));
+    db.delete_by_pk(1).unwrap();
+    println!("Row after deletion: {:?}", db.select_by_pk(1).unwrap());
 }

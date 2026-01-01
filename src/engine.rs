@@ -255,6 +255,31 @@ impl Engine {
         None
     }
 
+    pub fn delete_raw(&mut self, key: String) {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs();
+        let record = Record::new(key.clone(), Vec::new(), now, true);
+
+        let offset = {
+            let mut storage = self.storage.lock().unwrap();
+            storage.append(&record)
+        };
+
+        if let Err(e) = offset {
+            eprintln!("[EnsoDB error] Error while deleting: {}", e);
+            return;
+        }
+
+        let seg = self.active_segment();
+        self.ensure_seg_index_loaded(&seg);
+
+        {
+            let mut index = self.index.write().unwrap();
+            index.get_mut(&seg).unwrap().insert(key, offset.unwrap());
+        }
+
+        self.maybe_compact();
+    }
+
     pub fn scan_prefix(&self, prefix: &str) -> Vec<(String, Vec<u8>)> {
         let segments = {
             let storage = self.storage.lock().unwrap();

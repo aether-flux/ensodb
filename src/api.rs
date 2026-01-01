@@ -1,6 +1,6 @@
 use crate::{codec::RowCodec, engine::Engine, error::DbError, schema::SchemaManager, types::{Column, TableSchema, Value}};
 
-struct Enso {
+pub struct Enso {
     engine: Engine,
     pub db: Option<String>,
     pub table: Option<String>,
@@ -31,11 +31,12 @@ impl Enso {
     }
 
     // -> Create new table with schema
-    pub fn create_table(&mut self, table: &str, columns: Vec<Column>, primary_key: &str) -> Result<(), DbError> {
+    pub fn create_table(&mut self, table: &str, schema: (Vec<Column>, usize)) -> Result<(), DbError> {
         let db = self.db.as_ref().ok_or(DbError::NoDatabaseSelected)?;
+        let (columns, primary_key) = schema;
 
         // validate primary key
-        let primary_key = columns.iter().position(|c| c.name == primary_key).ok_or(DbError::InvalidPrimaryKey)?;
+        // let primary_key = columns.iter().position(|c| c.name == primary_key).ok_or(DbError::InvalidPrimaryKey)?;
         let schema = TableSchema { name: table.to_string(), columns, primary_key };
 
         // store schema in disk
@@ -65,8 +66,8 @@ impl Enso {
     }
 
     // -> Insert into active/current table (set using use_table())
-    pub fn insert<V>(&mut self, row: Vec<V>) -> Result<(), DbError>
-    where V: Into<Value> {
+    pub fn insert<I, V>(&mut self, row: I) -> Result<(), DbError>
+    where I: IntoIterator<Item = V>, V: Into<Value> {
         let table = self.table.as_ref().ok_or(DbError::NoTableSelected)?;
         let db = self.db.as_ref().ok_or(DbError::NoDatabaseSelected)?;
         let row: Vec<Value> = row.into_iter().map(Into::into).collect();
@@ -100,8 +101,8 @@ impl Enso {
     }
 
     // -> Insert into specified table
-    pub fn insert_into<V>(&mut self, table: &str, row: Vec<V>) -> Result<(), DbError>
-    where V: Into<Value> {
+    pub fn insert_into<I, V>(&mut self, table: &str, row: I) -> Result<(), DbError>
+    where I: IntoIterator<Item = V>, V: Into<Value> {
         let db = self.db.as_ref().ok_or(DbError::NoDatabaseSelected)?;
         let row: Vec<Value> = row.into_iter().map(Into::into).collect();
 
@@ -167,10 +168,12 @@ impl Enso {
     }
 
     // -> Select row by primary key 
-    pub fn select_by_pk(&mut self, pk: Value) -> Result<Option<Vec<Value>>, DbError> {
+    pub fn select_by_pk<V>(&mut self, pk: V) -> Result<Option<Vec<Value>>, DbError>
+    where V: Into<Value> {
         let db = self.db.as_ref().ok_or(DbError::NoDatabaseSelected)?;
         let table = self.table.as_ref().ok_or(DbError::NoTableSelected)?;
         let schema = self.schema.get(&db, &table)?;
+        let pk = pk.into();
 
         let key = format!("{}:{}:{}", db, table, pk);
 
@@ -184,9 +187,11 @@ impl Enso {
     }
 
     // -> Select row by primary key from specified table
-    pub fn select_by_pk_from(&mut self, table: &str, pk: Value) -> Result<Option<Vec<Value>>, DbError> {
+    pub fn select_by_pk_from<V>(&mut self, table: &str, pk: V) -> Result<Option<Vec<Value>>, DbError>
+    where V: Into<Value> {
         let db = self.db.as_ref().ok_or(DbError::NoDatabaseSelected)?;
         let schema = self.schema.get(&db, &table)?;
+        let pk = pk.into();
 
         let key = format!("{}:{}:{}", db, table, pk);
 
@@ -198,4 +203,83 @@ impl Enso {
             None => Ok(None),
         }
     }
+
+    // -> Delete row by primary key
+    pub fn delete_by_pk<V>(&mut self, pk: V) -> Result<(), DbError>
+    where V: Into<Value> {
+        let db = self.db.as_ref().ok_or(DbError::NoDatabaseSelected)?;
+        let table = self.table.as_ref().ok_or(DbError::NoTableSelected)?;
+        let pk = pk.into();
+
+        let key = format!("{}:{}:{}", db, table, pk);
+        self.engine.delete_raw(key);
+
+        Ok(())
+    }
+
+    // -> Delete row by primary key from specified table
+    pub fn delete_by_pk_from<V>(&mut self, table: &str, pk: V) -> Result<(), DbError>
+    where V: Into<Value> {
+        let db = self.db.as_ref().ok_or(DbError::NoDatabaseSelected)?;
+        let pk = pk.into();
+
+        let key = format!("{}:{}:{}", db, table, pk);
+        self.engine.delete_raw(key);
+
+        Ok(())
+    }
+}
+
+#[macro_export]
+macro_rules! row {
+    ($($val:expr),* $(,)?) => {
+        vec![$(Value::from($val)),*]
+    };
+}
+
+#[macro_export]
+macro_rules! col {
+    ($name:ident : $dtype:ident) => {
+        Column::new(
+        stringify!($name),
+        types::DataType::$dtype
+        )
+    };
+}
+
+#[macro_export]
+macro_rules! cols {
+    ($($name:ident : $dtype:ident),* $(,)?) => {
+        vec![
+            $(col!($name : $dtype)),*
+        ]
+    };
+}
+
+#[macro_export]
+macro_rules! schema {
+    ($($name:ident : $dtype:ident $(=> $pk:ident)?),* $(,)?) => {{
+        let mut columns = Vec::new();
+        let mut primary_key = None;
+
+        $(
+            let idx = columns.len();
+            columns.push(Column::new(
+                stringify!($name),
+                types::DataType::$dtype
+            ));
+
+            $(
+                {
+                    if stringify!($pk) != "pk" {
+                        panic!("Unknown schema attribute: {}", stringify!($pk));
+                    }
+                    primary_key = Some(idx);
+                }
+            )?
+        )*
+
+        let pk = primary_key.expect("Primary key not specified");
+        (columns, pk)
+    }};
 }

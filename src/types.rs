@@ -24,13 +24,13 @@ pub struct TableSchema {
     pub primary_key: usize,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Column {
     pub name: String,
     pub dtype: DataType,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub enum DataType {
     Int,
     Float,
@@ -38,13 +38,19 @@ pub enum DataType {
     String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub enum Value {
     Int(i64),
     Float(f64),
     Bool(bool),
     String(String),
     Null,
+}
+
+impl Column {
+    pub fn new(name: &str, dtype: DataType) -> Self {
+        Self { name: name.to_string(), dtype }
+    }
 }
 
 impl Value {
