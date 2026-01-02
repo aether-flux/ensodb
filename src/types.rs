@@ -38,7 +38,7 @@ pub enum DataType {
     String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Value {
     Int(i64),
     Float(f64),

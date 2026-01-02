@@ -5,12 +5,18 @@ pub enum DbError {
     DatabaseExists,
     DatabaseNotFound,
     NoDatabaseSelected,
+
     InvalidPrimaryKey,
     InvalidPrimaryKeyType,
     TableNotFound,
     NoTableSelected,
     ColumnCountMismatch,
     TypeMismatch { column: String },
+
+    UnsupportedExpression,
+    UnsupportedStatement,
+    UnsupportedFilter,
+
     Io(std::io::Error),
     SerdeJsonError(serde_json::Error),
     Utf8(FromUtf8Error),

@@ -1,4 +1,4 @@
-use crate::{codec::RowCodec, engine::Engine, error::DbError, schema::SchemaManager, types::{Column, TableSchema, Value}};
+use crate::{codec::RowCodec, engine::Engine, error::DbError, schema::SchemaManager, sql::ast::{Expr, QueryResult, Stmt}, types::{Column, TableSchema, Value}};
 
 pub struct Enso {
     engine: Engine,
@@ -204,6 +204,26 @@ impl Enso {
         }
     }
 
+    pub fn select_where(&mut self, table: &str, filter: Option<Expr>) -> Result<Option<Vec<Vec<Value>>>, DbError> {
+        if let Some(filter) = filter {
+            match filter {
+                Expr::Eq { column, value } => {
+                    let v = value.eval()?;
+                    let row = self.select_by_pk_from(table, v)?;
+                    if let Some(row) = row {
+                        Ok(Some(vec![row]))
+                    } else {
+                        Ok(None)
+                    }
+                },
+                _ => Err(DbError::UnsupportedFilter),
+            }
+        } else {
+            let rows = self.select_all_from(table)?;
+            Ok(Some(rows))
+        }
+    }
+
     // -> Delete row by primary key
     pub fn delete_by_pk<V>(&mut self, pk: V) -> Result<(), DbError>
     where V: Into<Value> {
@@ -227,6 +247,43 @@ impl Enso {
         self.engine.delete_raw(key);
 
         Ok(())
+    }
+
+    pub fn delete_where(&mut self, table: &str, filter: Expr) -> Result<u64, DbError> {
+        match filter {
+            Expr::Eq { column, value } => {
+                let v = value.eval()?;
+                self.delete_by_pk_from(table, v)?;
+                Ok(1)
+            },
+            _ => Err(DbError::UnsupportedFilter),
+        }
+    }
+
+    pub fn execute(&mut self, stmt: Stmt) -> Result<QueryResult, DbError> {
+        match stmt {
+            Stmt::Insert { table, values } => {
+                let row: Vec<Value> = values
+                    .into_iter()
+                    .map(|expr| expr.eval())
+                    .collect::<Result<_, _>>()?;
+
+                self.insert_into(&table, row)?;
+                Ok(QueryResult::Affected(1))
+            }
+
+            Stmt::Select { table, filter } => {
+                let rows = self.select_where(&table, filter)?;
+                Ok(QueryResult::Rows(rows))
+            }
+
+            Stmt::Delete { table, filter } => {
+                let deleted = self.delete_where(&table, filter)?;
+                Ok(QueryResult::Affected(deleted))
+            }
+
+            _ => Err(DbError::UnsupportedStatement),
+        }
     }
 }
 
