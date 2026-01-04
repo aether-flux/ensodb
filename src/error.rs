@@ -16,6 +16,8 @@ pub enum DbError {
     UnsupportedExpression,
     UnsupportedStatement,
     UnsupportedFilter,
+    ParseError(String),
+    UnexpectedToken { expected: String, found: String },
 
     Io(std::io::Error),
     SerdeJsonError(serde_json::Error),

@@ -1,5 +1,8 @@
 use crate::{error::DbError, types::Value};
 
+use super::lexer::Token;
+
+#[derive(Debug)]
 pub enum Expr {
     Literal(Value),
     Eq {
@@ -17,6 +20,18 @@ impl Expr {
     }
 }
 
+impl From<Token> for Expr {
+    fn from(tok: Token) -> Self {
+        match tok {
+            Token::Int(v) => Expr::Literal(Value::Int(v)),
+            Token::Float(v) => Expr::Literal(Value::Float(v)),
+            Token::String(v) => Expr::Literal(Value::String(v)),
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub enum Stmt {
     Insert {
         table: String,

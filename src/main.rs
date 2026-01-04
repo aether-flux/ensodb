@@ -2,7 +2,7 @@ use std::time;
 
 use api::Enso;
 use engine::Engine;
-use sql::lexer::{Lexer, Token};
+use sql::{lexer::{Lexer, Token}, parser::Parser};
 use types::{Column, Value};
 
 mod record;
@@ -38,11 +38,16 @@ fn main() {
 
     let mut lexer = Lexer::new(r#"INSERT INTO users VALUES (1, "amartya");"#);
 
-    loop {
-        let tok = lexer.next_token().unwrap();
-        println!("{:?}", tok);
-        if tok == Token::EOF {
-            break;
-        }
-    }
+    // loop {
+    //     let tok = lexer.next_token().unwrap();
+    //     println!("{:?}", tok);
+    //     if tok == Token::EOF {
+    //         break;
+    //     }
+    // }
+
+    let mut parser = Parser::new(lexer).unwrap();
+    let stmt = parser.parse_stmt().unwrap();
+
+    println!("{:#?}", stmt);
 }
