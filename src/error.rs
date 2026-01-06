@@ -41,3 +41,4 @@ impl From<FromUtf8Error> for DbError {
         DbError::Utf8(e)
     }
 }
+

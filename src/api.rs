@@ -1,4 +1,4 @@
-use crate::{codec::RowCodec, engine::Engine, error::DbError, schema::SchemaManager, sql::ast::{Expr, QueryResult, Stmt}, types::{Column, TableSchema, Value}};
+use crate::{codec::RowCodec, engine::Engine, error::DbError, schema::SchemaManager, sql::{ast::{Expr, QueryResult, Stmt}, lexer::Lexer, parser::Parser}, types::{Column, TableSchema, Value}};
 
 pub struct Enso {
     engine: Engine,
@@ -28,6 +28,11 @@ impl Enso {
         schema.load_db(&db)?;
         let db = Some(db.to_string());
         return Ok(Self { engine, db, table: None, schema });
+    }
+
+    // -> Get selected DB name
+    pub fn current_db(&self) -> &str {
+        self.db.as_deref().unwrap_or("no-db")
     }
 
     // -> Create new table with schema
@@ -260,6 +265,16 @@ impl Enso {
         }
     }
 
+    pub fn query(&mut self, input: &str) -> Result<QueryResult, DbError> {
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer)?;
+
+        let stmt = parser.parse_stmt()?;
+        let result = self.execute(stmt)?;
+
+        Ok(result)
+    }
+
     pub fn execute(&mut self, stmt: Stmt) -> Result<QueryResult, DbError> {
         match stmt {
             Stmt::Insert { table, values } => {
@@ -321,9 +336,9 @@ macro_rules! schema {
 
         $(
             let idx = columns.len();
-            columns.push(Column::new(
+            columns.push(crate::types::Column::new(
                 stringify!($name),
-                types::DataType::$dtype
+                crate::types::DataType::$dtype
             ));
 
             $(

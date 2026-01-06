@@ -47,6 +47,7 @@ pub enum Stmt {
     }
 }
 
+#[derive(Debug)]
 pub enum QueryResult {
     Rows(Option<Vec<Vec<Value>>>),
     Affected(u64),
