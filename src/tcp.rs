@@ -43,10 +43,17 @@ fn handle_client(stream: TcpStream, db: Arc<Mutex<Enso>>) {
         let mut response = {
             let mut db = db.lock().unwrap();
             match db.query(query) {
-                Ok(res) => format_response(res),
-                Err(e) => format!("ERROR: {:?}\n", e),
+                Ok(res) => format_response(&mut db, res),
+                Err(e) => Ok(format!("ERROR: {:?}\n", e)),
             }
         };
+
+        if let Err(e) = response {
+            eprintln!("[enso] Error: {:?}", e);
+            continue;
+        }
+
+        let mut response = response.unwrap();
 
         // response.push('\n');
         response.push_str(EOF_MARKER);

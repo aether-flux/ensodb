@@ -1,6 +1,10 @@
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     // keywords
+    Create,
+    Table,
+    Primary,
+    Key,
     Insert,
     Into,
     Values,
@@ -65,6 +69,10 @@ impl Lexer {
 
     fn keyword_or_ident(ident: String) -> Token {
         match ident.to_uppercase().as_str() {
+            "CREATE" => Token::Create,
+            "TABLE" => Token::Table,
+            "PRIMARY" => Token::Primary,
+            "KEY" => Token::Key,
             "INSERT" => Token::Insert,
             "INTO" => Token::Into,
             "VALUES" => Token::Values,

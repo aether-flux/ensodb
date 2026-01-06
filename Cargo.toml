@@ -1,7 +1,16 @@
 [package]
-name = "ensodb"
+name = "enso"
 version = "0.1.0"
 edition = "2024"
+authors = ["Amartya Chowdhury (aether-flux) <amartya96@proton.me>"]
+description = "Enso is an experimental database engine built to explore storage engines, query execution, and networking."
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/aether-flux/enso"
+keywords = ["db", "database", "repl", "interactive", "cli"]
+homepage = "https://github.com/aether-flux/enso"
+documentation = "https://github.com/aether-flux/enso#readme"
+exclude = ["tests/*", "output/*", "docs/*", "target/*", ".github", ".gitignore"]
 
 [dependencies]
 bincode = "1.3"

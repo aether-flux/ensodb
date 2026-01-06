@@ -1,4 +1,4 @@
-use crate::{error::DbError, types::Value};
+use crate::{error::DbError, types::{Value, Column}};
 
 use super::lexer::Token;
 
@@ -33,6 +33,11 @@ impl From<Token> for Expr {
 
 #[derive(Debug)]
 pub enum Stmt {
+    CreateTable {
+        table: String,
+        columns: Vec<Column>,
+        primary_key: usize,
+    },
     Insert {
         table: String,
         values: Vec<Expr>,
@@ -48,7 +53,19 @@ pub enum Stmt {
 }
 
 #[derive(Debug)]
+pub struct Rowset {
+    pub table: String,
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<Value>>,
+}
+
+#[derive(Debug)]
 pub enum QueryResult {
-    Rows(Option<Vec<Vec<Value>>>),
     Affected(u64),
+
+    // Rows(Rowset),
+    Rows {
+        table: String,
+        rows: Option<Vec<Vec<Value>>>,
+    }
 }

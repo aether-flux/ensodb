@@ -2,7 +2,7 @@ use std::{sync::{Arc, Mutex}, time::Duration};
 
 use rustyline::{error::ReadlineError, DefaultEditor};
 
-use crate::{api::Enso, error::DbError, schema, sql::{ast::QueryResult, lexer::Lexer, parser::Parser}};
+use crate::{api::Enso, error::DbError, pretty::pretty_rows, schema, sql::{ast::QueryResult, lexer::Lexer, parser::Parser}, types::{TableSchema, Value}};
 
 pub fn start_repl(db: Arc<Mutex<Enso>>) {
     println!("EnsoDB v0.1");
@@ -121,7 +121,7 @@ fn run_query(line: &str, db: &mut Enso) -> Result<(), DbError> {
     let stmt = parser.parse_stmt()?;
     let result = db.execute(stmt)?;
 
-    print_result(result);
+    print_result(db, result);
 
     Ok(())
 }
@@ -141,48 +141,64 @@ Meta Commands:
   .exit             Exit EnsoDB
 
 SQL Statements:
-  INSERT INTO <table> VALUES (...)
-  SELECT * FROM <table>
-  SELECT * FROM <table> WHERE <column(primary_key)> = <value>
-  DELETE FROM <table> WHERE <column(primary_key)> = <value>
+  CREATE TABLE IDENT (COLNAME TYPE [PRIMARY KEY] [, ...]);
+  INSERT INTO <table> VALUES (...);
+  SELECT * FROM <table>;
+  SELECT * FROM <table> WHERE <column(primary_key)> = <value>;
+  DELETE FROM <table> WHERE <column(primary_key)> = <value>;
 "#
     );
 }
 
-pub fn print_result(result: QueryResult) {
-    match result {
-        QueryResult::Affected(n) => {
-            println!("{} row(s) affected", n);
-        }
-
-        QueryResult::Rows(Some(rows)) => {
-            for row in rows {
-                println!("{:?}", row);
-            }
-        }
-
-        QueryResult::Rows(None) => {
-            println!("Empty set");
-        }
-    }
+pub fn print_result(db: &mut Enso, result: QueryResult) {
+    let out = format_response(db, result).unwrap();
+    println!("{}", out);
 }
 
-pub fn format_response(res: QueryResult) -> String {
+// pub fn format_response(db: &Enso, res: QueryResult) -> Result<String, DbError> {
+//     match res {
+//         QueryResult::Affected(n) => {
+//             Ok(format!("{} row(s) affected\n", n))
+//         }
+//
+//         QueryResult::Rows(Some(rows)) => {
+//             // let mut res = String::new();
+//             // for row in rows {
+//             //     res.push_str(format!("{:?}\n", row).as_str());
+//             // }
+//             let schema = db.schema.get(db.current_db(), table)?;
+//             res
+//         }
+//
+//         QueryResult::Rows(None) => {
+//             Ok(format!("Empty set\n"))
+//         }
+//     }
+// }
+
+pub fn format_response(db: &mut Enso, res: QueryResult) -> Result<String, DbError> {
     match res {
         QueryResult::Affected(n) => {
-            format!("{} row(s) affected\n", n)
+            Ok(format!("{} row(s) affected\n", n))
         }
 
-        QueryResult::Rows(Some(rows)) => {
-            let mut res = String::new();
-            for row in rows {
-                res.push_str(format!("{:?}\n", row).as_str());
+        QueryResult::Rows { table, rows } => {
+            if let None = rows {
+                return Ok("Empty set\n".to_string());
             }
-            res
-        }
 
-        QueryResult::Rows(None) => {
-            format!("Empty set\n")
+            let rows = rows.unwrap();
+
+            if rows.is_empty() {
+                return Ok("Empty set\n".to_string());
+            }
+
+            let current_db = db.current_db().to_string();
+            let schema = db.schema.get(&current_db, &table)?;
+
+            let out = pretty_rows(&schema, &rows);
+
+            Ok(out)
         }
     }
 }

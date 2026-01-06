@@ -277,6 +277,11 @@ impl Enso {
 
     pub fn execute(&mut self, stmt: Stmt) -> Result<QueryResult, DbError> {
         match stmt {
+            Stmt::CreateTable { table, columns, primary_key } => {
+                self.create_table(&table, (columns, primary_key))?;
+                Ok(QueryResult::Affected(0))
+            },
+
             Stmt::Insert { table, values } => {
                 let row: Vec<Value> = values
                     .into_iter()
@@ -289,7 +294,10 @@ impl Enso {
 
             Stmt::Select { table, filter } => {
                 let rows = self.select_where(&table, filter)?;
-                Ok(QueryResult::Rows(rows))
+                Ok(QueryResult::Rows {
+                    table,
+                    rows,
+                })
             }
 
             Stmt::Delete { table, filter } => {

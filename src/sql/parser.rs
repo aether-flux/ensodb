@@ -1,4 +1,4 @@
-use crate::error::DbError;
+use crate::{error::DbError, types::{Column, DataType}};
 
 use super::{ast::{Expr, Stmt}, lexer::{Lexer, Token}};
 
@@ -46,6 +46,83 @@ impl Parser {
     }
 
     // Parsing
+    fn parse_create(&mut self) -> Result<Stmt, DbError> {
+        self.expect(Token::Create)?;
+        self.expect(Token::Table)?;
+
+        let table = self.expect_ident()?;
+
+        self.expect(Token::LParen)?;
+
+        let mut columns = Vec::new();
+        let mut primary_key = None;
+
+        loop {
+            // column name
+            let col_name = self.expect_ident()?;
+
+            // column type
+            // self.advance()?;
+            // let dtype = match self.current.clone() {
+            //     Token::Int(v) => DataType::Int,
+            //     Token::String(v) => DataType::String,
+            //     Token::Float(v) => DataType::Float,
+            //     _ => return Err(DbError::InvalidDataType),
+            // };
+
+            let dtype = match &self.current {
+                Token::Ident(t) => match t.to_uppercase().as_str() {
+                    "INT" => DataType::Int,
+                    "STRING" => DataType::String,
+                    "FLOAT" => DataType::Float,
+                    "BOOL" => DataType::Bool,
+                    _ => return Err(DbError::InvalidDataType),
+                },
+                _ => return Err(DbError::InvalidDataType),
+            };
+            self.advance()?;
+
+            let col_idx = columns.len();
+            columns.push(Column::new(&col_name, dtype));
+
+            if self.current == Token::Primary {
+                self.advance()?;
+                self.expect(Token::Key)?;
+
+                if primary_key.is_some() {
+                    return Err(DbError::DuplicatePrimaryKey);
+                }
+
+                primary_key = Some(col_idx);
+            }
+
+            match self.current {
+                Token::Comma => {
+                    self.advance()?;
+                    continue;
+                }
+                Token::RParen => {
+                    self.advance()?;
+                    break;
+                }
+                _ => {
+                    return Err(DbError::UnexpectedToken {
+                        expected: "comma or ')'".into(),
+                        found: format!("{:?}", self.current),
+                    });
+                }
+            }
+        }
+
+        let primary_key = primary_key.ok_or(DbError::PrimaryKeyMissing)?;
+
+        Ok(Stmt::CreateTable {
+            table,
+            columns,
+            primary_key,
+        })
+    }
+
     fn parse_insert(&mut self) -> Result<Stmt, DbError> {
         self.expect(Token::Insert)?;
         self.expect(Token::Into)?;
@@ -142,6 +219,7 @@ impl Parser {
 
     pub fn parse_stmt(&mut self) -> Result<Stmt, DbError> {
         match self.current {
+            Token::Create => self.parse_create(),
             Token::Insert => self.parse_insert(),
             Token::Select => self.parse_select(),
             Token::Delete => self.parse_delete(),

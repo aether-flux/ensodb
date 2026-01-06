@@ -21,6 +21,7 @@ mod sql;
 mod repl;
 mod client;
 mod tcp;
+mod pretty;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // let mut db = Enso::open("test_db").unwrap();

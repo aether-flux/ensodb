@@ -1,5 +1,7 @@
 use std::string::FromUtf8Error;
 
+use crate::{sql::lexer::Token, types::DataType};
+
 #[derive(Debug)]
 pub enum DbError {
     DatabaseExists,
@@ -11,6 +13,7 @@ pub enum DbError {
     TableNotFound,
     NoTableSelected,
     ColumnCountMismatch,
+    InvalidDataType,
     TypeMismatch { column: String },
 
     UnsupportedExpression,
@@ -18,6 +21,8 @@ pub enum DbError {
     UnsupportedFilter,
     ParseError(String),
     UnexpectedToken { expected: String, found: String },
+    DuplicatePrimaryKey,
+    PrimaryKeyMissing,
 
     Io(std::io::Error),
     SerdeJsonError(serde_json::Error),
