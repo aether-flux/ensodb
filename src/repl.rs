@@ -170,18 +170,19 @@ pub fn print_result(result: QueryResult) {
 pub fn format_response(res: QueryResult) -> String {
     match res {
         QueryResult::Affected(n) => {
-            format!("{} row(s) affected", n)
+            format!("{} row(s) affected\n", n)
         }
 
         QueryResult::Rows(Some(rows)) => {
-            // for row in rows {
-            //     format!("{:?}", row)
-            // }
-            "".to_string()
+            let mut res = String::new();
+            for row in rows {
+                res.push_str(format!("{:?}\n", row).as_str());
+            }
+            res
         }
 
         QueryResult::Rows(None) => {
-            format!("Empty set")
+            format!("Empty set\n")
         }
     }
 }

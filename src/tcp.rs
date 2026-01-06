@@ -2,6 +2,8 @@ use std::{io::{BufRead, BufReader, Write}, net::{TcpListener, TcpStream}, sync::
 
 use crate::{api::Enso, repl::format_response};
 
+pub const EOF_MARKER: &str = "<ENSO_EOF>";
+
 pub fn start_tcp(db: Arc<Mutex<Enso>>) {
     std::thread::spawn(move || {
         let addr = "127.0.0.1:5432";
@@ -38,13 +40,17 @@ fn handle_client(stream: TcpStream, db: Arc<Mutex<Enso>>) {
             continue;
         }
 
-        let response = {
+        let mut response = {
             let mut db = db.lock().unwrap();
             match db.query(query) {
                 Ok(res) => format_response(res),
                 Err(e) => format!("ERROR: {:?}\n", e),
             }
         };
+
+        // response.push('\n');
+        response.push_str(EOF_MARKER);
+        response.push('\n');
 
         let _ = writer.write_all(response.as_bytes());
     }
