@@ -55,10 +55,12 @@ fn handle_client(stream: TcpStream, db: Arc<Mutex<Enso>>) {
 
         let mut response = response.unwrap();
 
-        // response.push('\n');
+        response.push('\n');
         response.push_str(EOF_MARKER);
         response.push('\n');
 
-        let _ = writer.write_all(response.as_bytes());
+        // let _ = writer.write_all(response.as_bytes());
+        writer.write_all(response.as_bytes()).ok();
+        writer.flush().ok();
     }
 }
