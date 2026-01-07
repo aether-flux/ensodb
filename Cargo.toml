@@ -11,6 +11,7 @@ keywords = ["db", "database", "repl", "interactive", "cli"]
 homepage = "https://github.com/aether-flux/enso"
 documentation = "https://github.com/aether-flux/enso#readme"
 exclude = ["tests/*", "output/*", "docs/*", "target/*", ".github", ".gitignore"]
+categories = ["database"]
 
 [dependencies]
 bincode = "1.3"
