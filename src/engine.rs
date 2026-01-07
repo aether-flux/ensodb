@@ -55,7 +55,9 @@ impl Engine {
         let map = {
             let storage = self.storage.lock().unwrap();
             let name = &seg[..seg.rfind('.').unwrap()];
-            let idx_path = format!("data/index/{}.idx", name);
+            let base = storage.get_base();
+            // let idx_path = format!("data/index/{}.idx", name);
+            let idx_path = base.join("index").join(format!("{}.idx", name));
             storage.load_idx(&idx_path).unwrap_or_default()
         };
 
@@ -101,7 +103,9 @@ impl Engine {
                 // load new segment index
                 let idx = {
                     let storage = storage.lock().unwrap();
-                    storage.load_idx(format!("data/index/{}.idx", &new_seg[..new_seg.rfind('.').unwrap()]).as_str()).unwrap_or_default()
+                    let base = storage.get_base();
+                    // storage.load_idx(format!("data/index/{}.idx", &new_seg[..new_seg.rfind('.').unwrap()]).as_str()).unwrap_or_default()
+                    storage.load_idx(&base.join("index").join(format!("{}.idx", &new_seg[..new_seg.rfind('.').unwrap()]).as_str())).unwrap_or_default()
                 };
                 index.put(new_seg, idx);
             }

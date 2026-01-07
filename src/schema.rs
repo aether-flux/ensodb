@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{error::DbError, types::TableSchema};
+use crate::{error::DbError, storage::enso_data_dir, types::TableSchema};
 
 pub struct SchemaManager {
     // HashMap stores db -> (table -> schema)
@@ -14,7 +14,9 @@ impl SchemaManager {
 
     pub fn load_db(&mut self, db: &str) -> Result<(), DbError> {
         // path to table schemas
-        let path = format!("data/schema/{}", db);
+        let base = enso_data_dir();
+        // let path = format!("data/schema/{}", db);
+        let path = base.join("schema").join(db);
         let mut tables = HashMap::new();
 
         // read through every table schema

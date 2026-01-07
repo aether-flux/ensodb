@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs::{rename, File, OpenOptions}, io::{Read, Seek, SeekFrom, Write}, num::NonZeroUsize};
+use std::{collections::HashMap, fmt::format, fs::{rename, File, OpenOptions}, io::{Read, Seek, SeekFrom, Write}, num::NonZeroUsize, path::PathBuf};
 use std::path::Path;
 use chrono::Utc;
 use lru::LruCache;
@@ -7,17 +7,39 @@ use crate::{record::Record, types::{Manifest, SegIndex}, utils::decode_u32};
 // const MAX_FILE_SIZE: u64 = 10 * 1000 * 1000;
 const MAX_FILE_SIZE: u64 = 111;
 
+pub fn enso_data_dir() -> PathBuf {
+    if let Some(mut dir) = dirs::data_dir() {
+        dir.push("enso");
+        return dir;
+    }
+
+    // fallback if no data dir found for OS: ~/.enso
+    let mut home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    home.push("enso");
+    home
+}
+
 pub struct Storage {
+    base: PathBuf,
     file: std::fs::File,
     pub manifest: Manifest,
 }
 
 impl Storage {
     pub fn new() -> Self {
-        let manifest_path = "data/manifest.json";
+        let base = enso_data_dir();
+
+        std::fs::create_dir_all(base.join("segments")).unwrap();
+        std::fs::create_dir_all(base.join("index")).unwrap();
+        std::fs::create_dir_all(base.join("schema")).unwrap();
+
+        let manifest_path = base.join("manifest.json");
+        // let manifest_path = "data/manifest.json";
         // std::fs::create_dir_all("data/index").unwrap();
 
-        let manifest = if Path::new(manifest_path).exists() {
+        let manifest = if manifest_path.exists() {
             let data = std::fs::read_to_string(manifest_path).unwrap();
             serde_json::from_str::<Manifest>(&data).unwrap()
         } else {
@@ -27,22 +49,24 @@ impl Storage {
                 last_compaction: None,
             };
 
-            std::fs::create_dir_all("data/segments").unwrap();
+            // std::fs::create_dir_all("data/segments").unwrap();
             // std::fs::create_dir_all("data/index").unwrap();
-            std::fs::write(manifest_path, serde_json::to_string_pretty(&manifest).unwrap()).unwrap();
+            std::fs::write(&manifest_path, serde_json::to_string_pretty(&manifest).unwrap()).unwrap();
 
             manifest
         };
 
         // Create idx file(s)
-        std::fs::create_dir_all("data/index").unwrap();
-        let idx_path = format!("data/index/{}.idx", manifest.active_segment.trim_end_matches(".log"));
+        // std::fs::create_dir_all("data/index").unwrap();
+        // let idx_path = format!("data/index/{}.idx", manifest.active_segment.trim_end_matches(".log"));
+        let idx_path = base.join("index").join(manifest.active_segment.trim_end_matches(".log")).with_extension("idx");
         if !Path::new(&idx_path).exists() {
             File::create(idx_path).unwrap();
         }
 
         // Create segment file
-        let active_path = format!("data/segments/{}", manifest.active_segment);
+        // let active_path = format!("data/segments/{}", manifest.active_segment);
+        let active_path = base.join("segments").join(&manifest.active_segment);
         let file = OpenOptions::new()
             .read(true)
             .append(true)
@@ -50,15 +74,21 @@ impl Storage {
             .open(active_path)
             .unwrap();
 
-        Self { file, manifest }
+        Self { base, file, manifest }
+    }
+
+    pub fn get_base(&self) -> &Path {
+        &self.base
     }
 
     pub fn save_manifest(&self) {
+        let path = self.base.join("manifest.json");
         let data = serde_json::to_string_pretty(&self.manifest).unwrap();
-        std::fs::write("data/manifest.json", data).unwrap();
+        // std::fs::write("data/manifest.json", data).unwrap();
+        std::fs::write(path, data).unwrap();
     }
 
-    pub fn append_idx_entry(idx_path: &str, key: &str, offset: u64) -> std::io::Result<()> {
+    pub fn append_idx_entry(idx_path: &Path, key: &str, offset: u64) -> std::io::Result<()> {
         let mut f = OpenOptions::new().create(true).append(true).open(idx_path)?;
         f.write_all(&(key.len() as u32).to_be_bytes())?;
         f.write_all(key.as_bytes())?;
@@ -67,7 +97,7 @@ impl Storage {
         Ok(())
     }
 
-    pub fn load_idx(&self, idx_path: &str) -> std::io::Result<SegIndex> {
+    pub fn load_idx(&self, idx_path: &Path) -> std::io::Result<SegIndex> {
         let mut map = HashMap::new();
         let mut f = File::open(idx_path)?;
 
@@ -100,8 +130,10 @@ impl Storage {
 
         for s in segments {
             let seg_name = &s[..s.rfind('.').unwrap()];
-            let idx_path = format!("data/index/{}.idx", seg_name);
-            let seg_index = match self.load_idx(idx_path.as_str()) {
+            // let idx_path = format!("data/index/{}.idx", seg_name);
+            let idx_path = self.base.join("index").join(format!("{}.idx", seg_name));
+            // let idx_path: String = idx_path.to_string_lossy().to_owned();
+            let seg_index = match self.load_idx(&idx_path) {
                 Ok(map) => map,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                     // First run: no index files created
@@ -115,10 +147,13 @@ impl Storage {
         Ok(cache)
     }
 
-    fn active_idx_path(&self) -> String {
-        let seg = &self.manifest.active_segment;
-        let name = &seg[..seg.rfind('.').unwrap()];
-        format!("data/index/{}.idx", name)
+    fn active_idx_path(&self) -> PathBuf {
+        // let seg = &self.manifest.active_segment;
+        // let name = &seg[..seg.rfind('.').unwrap()];
+        // format!("data/index/{}.idx", name)
+
+        let name = self.manifest.active_segment.trim_end_matches(".log");
+        self.base.join("index").join(format!("{name}.idx"))
     }
 
     fn next_segment_name(&self) -> String {
@@ -173,7 +208,8 @@ impl Storage {
         let new_seg = self.next_segment_name();
 
         // create new segment file
-        let seg_path = format!("data/segments/{}", new_seg);
+        // let seg_path = format!("data/segments/{}", new_seg);
+        let seg_path = self.base.join("segments").join(&new_seg);
         let file = OpenOptions::new()
             .read(true)
             .append(true)
@@ -181,7 +217,8 @@ impl Storage {
             .open(&seg_path)?;
 
         // create index file
-        let idx_path = format!("data/index/{}.idx", new_seg.trim_end_matches(".log"));
+        // let idx_path = format!("data/index/{}.idx", new_seg.trim_end_matches(".log"));
+        let idx_path = self.base.join("index").join(format!("{}.idx", new_seg.trim_end_matches(".log")));
         File::create(idx_path)?;
 
         // update manifest
@@ -196,10 +233,12 @@ impl Storage {
     }
 
     // -> File compaction if size exceeds threshold
-    fn read_seg_into_map(seg: &str, mut records: HashMap<String, Record>) -> std::io::Result<HashMap<String, Record>> {
+    fn read_seg_into_map(&self, seg: &str, mut records: HashMap<String, Record>) -> std::io::Result<HashMap<String, Record>> {
+        // let base = enso_data_dir();
         let mut file = OpenOptions::new()
             .read(true)
-            .open(format!("data/segments/{}", seg))?;
+            // .open(format!("data/segments/{}", seg))?;
+            .open(self.base.join("segments").join(seg))?;
         // let mut records = HashMap::new();
 
         file.seek(SeekFrom::Start(0))?;
@@ -231,10 +270,15 @@ impl Storage {
         Ok(records)
     }
 
-    fn write_compacted_records(name: &str, records: HashMap<String, Record>) -> std::io::Result<()> {
+    fn write_compacted_records(&self, name: &str, records: HashMap<String, Record>) -> std::io::Result<()> {
+        // base file directory
+        // let base = enso_data_dir();
+
         // create temp files
-        let mut tmp_log_file = File::create(format!("data/segments/{}.log.tmp", name))?;
-        let mut tmp_idx_file = File::create(format!("data/index/{}.idx.tmp", name))?;
+        // let mut tmp_log_file = File::create(format!("data/segments/{}.log.tmp", name))?;
+        // let mut tmp_idx_file = File::create(format!("data/index/{}.idx.tmp", name))?;
+        let mut tmp_log_file = File::create(self.base.join("segments").join(format!("{}.log.tmp", name)))?;
+        let mut tmp_idx_file = File::create(self.base.join("index").join(format!("{}.idx.tmp", name)))?;
 
         let mut records: Vec<_> = records.into_iter().collect();
         records.sort_by(|a, b| a.0.cmp(&b.0));
@@ -256,8 +300,10 @@ impl Storage {
         tmp_log_file.sync_all()?;
         tmp_idx_file.sync_all()?;
 
-        rename(format!("data/segments/{}.log.tmp", name), format!("data/segments/{}.log", name))?;
-        rename(format!("data/index/{}.idx.tmp", name), format!("data/index/{}.idx", name))?;
+        // rename(format!("data/segments/{}.log.tmp", name), format!("data/segments/{}.log", name))?;
+        // rename(format!("data/index/{}.idx.tmp", name), format!("data/index/{}.idx", name))?;
+        rename(self.base.join("segments").join(format!("{}.log.tmp", name)), self.base.join("segments").join(format!("{}.log", name)))?;
+        rename(self.base.join("index").join(format!("{}.idx.tmp", name)), self.base.join("index").join(format!("{}.idx", name)))?;
 
         // Ok(format!("data/segments/{}.log", name))
         Ok(())
@@ -272,14 +318,14 @@ impl Storage {
         // compress all segments into one map
         let mut records: HashMap<String, Record> = HashMap::new();
         for seg in segments.iter().rev().clone() {
-            records = Self::read_seg_into_map(&seg, records)?;
+            records = self.read_seg_into_map(&seg, records)?;
         }
 
         // write to new segment
         // let name = &segments[0][..segments[0].rfind('.').unwrap()];
         // let name = format!("{}-compacted", name);
         let name = self.next_segment_name();
-        Self::write_compacted_records(&name[..name.rfind('.').unwrap()], records)?;
+        self.write_compacted_records(&name[..name.rfind('.').unwrap()], records)?;
         // println!("New segment created");
 
         let timestamp = Utc::now();
@@ -292,8 +338,10 @@ impl Storage {
         // delete old segments
         for seg in segments.clone() {
             let seg_name = &seg[..seg.rfind('.').unwrap()];
-            let _ = std::fs::remove_file(format!("data/segments/{}.log", seg_name));
-            let _ = std::fs::remove_file(format!("data/index/{}.idx", seg_name));
+            // let _ = std::fs::remove_file(format!("data/segments/{}.log", seg_name));
+            // let _ = std::fs::remove_file(format!("data/index/{}.idx", seg_name));
+            let _ = std::fs::remove_file(self.base.join("segments").join(format!("{}.log", seg_name)));
+            let _ = std::fs::remove_file(self.base.join("index").join(format!("{}.idx", seg_name)));
 
             // cleanup LRU cache/index
             // self.index.pop(&seg_name);
@@ -347,7 +395,8 @@ impl Storage {
     }
 
     pub fn read_from_segment(&mut self, seg: &str, offset: u64) -> std::io::Result<Record> {
-        let seg_path = format!("data/segments/{}", seg);
+        // let seg_path = format!("data/segments/{}", seg);
+        let seg_path = self.base.join("segments").join(seg);
         let mut seg_file = OpenOptions::new()
             .read(true)
             .open(seg_path)?;

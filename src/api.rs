@@ -1,4 +1,4 @@
-use crate::{codec::RowCodec, engine::Engine, error::DbError, schema::SchemaManager, sql::{ast::{Expr, QueryResult, Stmt}, lexer::Lexer, parser::Parser}, types::{Column, TableSchema, Value}};
+use crate::{codec::RowCodec, engine::Engine, error::DbError, schema::SchemaManager, sql::{ast::{Expr, QueryResult, Stmt}, lexer::Lexer, parser::Parser}, storage::enso_data_dir, types::{Column, TableSchema, Value}};
 
 pub struct Enso {
     engine: Engine,
@@ -17,9 +17,11 @@ impl Enso {
     // -> Create new or use existing database
     pub fn open(db: &str) -> Result<Self, DbError> {
         let engine = Engine::new();
+        let base = enso_data_dir();
 
         // create db path if it doesn't exist
-        let path = format!("data/schema/{}", db);
+        // let path = format!("data/schema/{}", db);
+        let path = base.join("schema").join(db);
         if !std::path::Path::new(&path).exists() {
             std::fs::create_dir_all(&path)?;
         }
@@ -38,6 +40,7 @@ impl Enso {
     // -> Create new table with schema
     pub fn create_table(&mut self, table: &str, schema: (Vec<Column>, usize)) -> Result<(), DbError> {
         let db = self.db.as_ref().ok_or(DbError::NoDatabaseSelected)?;
+        let base = enso_data_dir();
         let (columns, primary_key) = schema;
 
         // validate primary key
@@ -45,7 +48,8 @@ impl Enso {
         let schema = TableSchema { name: table.to_string(), columns, primary_key };
 
         // store schema in disk
-        let path = format!("data/schema/{}/{}.json", db, table);
+        // let path = format!("data/schema/{}/{}.json", db, table);
+        let path = base.join("schema").join(db).join(format!("{}.json", table));
         let json = serde_json::to_string_pretty(&schema)?;
         std::fs::write(&path, json)?;
 
@@ -59,9 +63,11 @@ impl Enso {
     // -> Set current/active table
     pub fn use_table(&mut self, table: &str) -> Result<(), DbError> {
         let db = self.db.as_ref().ok_or(DbError::NoDatabaseSelected)?;
+        let base = enso_data_dir();
 
         // check if table schema exists
-        let path = format!("data/schema/{}/{}.json", db, table);
+        // let path = format!("data/schema/{}/{}.json", db, table);
+        let path = base.join("schema").join(db).join(format!("{}.json", table));
         if !std::path::Path::new(&path).exists() {
             return Err(DbError::TableNotFound);
         }

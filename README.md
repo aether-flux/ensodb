@@ -24,14 +24,17 @@ It focuses on:
 
 ---
 
-## Getting Started
+## Installation
 
-### Build & Run
-
+### Linux
 ```bash
-git clone https://github.com/aether-flux/enso
-cd enso
-cargo run
+curl -fsSL https://raw.githubusercontent.com/aether-flux/ensodb/main/install/linux/install.sh | sh
+```
+
+### Windows
+Powershell:
+```bash
+iwr -useb https://raw.githubusercontent.com/aether-flux/ensodb/main/install/windows/install.bat | iex
 ```
 
 This starts:
@@ -46,7 +49,9 @@ This starts:
 1 row(s) affected
 
 [test_db] > SELECT * FROM users;
-[Int(1), String("amartya")]
+| id | name |
+|----|------|
+| 1  | user_name |
 ```
 
 ---
